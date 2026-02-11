@@ -117,17 +117,24 @@ async function sendMessage(groupName, message) {
             await randomDelay(500, 800);
         }
 
-        // Gõ phím - Đã tối ưu tốc độ nhanh hơn
-        console.log("⌨ Đang gõ nội dung...");
+        // Gõ phím - Sửa lỗi gửi nhiều bong bóng tin nhắn
+        console.log("⌨ Đang gõ nội dung (Chế độ 1 tin nhắn duy nhất)...");
         for (const char of message) {
-            await page.keyboard.type(char);
-            await randomDelay(10, 30); // Giảm delay phím xuống để gửi nhanh hơn
+            if (char === '\n') {
+                // Thay thế xuống dòng bằng Shift + Enter để Zalo không tự gửi tin
+                await page.keyboard.down('Shift');
+                await page.keyboard.press('Enter');
+                await page.keyboard.up('Shift');
+            } else {
+                await page.keyboard.type(char);
+            }
+            await randomDelay(5, 15); 
         }
 
-        await randomDelay(300, 500);
-        await page.keyboard.press('Enter');
+        await randomDelay(500, 1000);
+        await page.keyboard.press('Enter'); // Gửi toàn bộ 1 khối
 
-        console.log("✅ Đã gửi tin nhắn!");
+        console.log("✅ Đã gửi trọn bộ thông tin trong 1 tin nhắn!");
         return { success: true };
     } catch (error) {
         console.error("❌ Lỗi gửi ngầm:", error.message);
@@ -135,9 +142,20 @@ async function sendMessage(groupName, message) {
     }
 }
 
-// API Endpoint - Đã nâng cấp thành Async ngầm
+// API Endpoint - Hỗ trợ giới hạn giờ và gửi ngầm
 app.post('/send-zalo', (req, res) => {
-    // 1. Kiểm tra Key bảo mật
+    // 1. Kiểm tra giờ làm việc (8h - 24h)
+    const now = new Date();
+    const VietnamHour = (now.getUTCHours() + 7) % 24; // Tính giờ VN từ UTC
+
+    if (VietnamHour < 8 && VietnamHour >= 0) {
+        return res.status(403).json({ 
+            success: false, 
+            error: `Bot đang trong giờ nghỉ (Giờ VN hiện tại: ${VietnamHour}h). Vui lòng thử lại sau 8h sáng!` 
+        });
+    }
+
+    // 2. Kiểm tra Key bảo mật
     const clientKey = req.headers['x-api-key'];
     if (clientKey !== SECRET_KEY) {
         return res.status(401).json({ error: "Unauthorized" });
@@ -148,11 +166,10 @@ app.post('/send-zalo', (req, res) => {
         return res.status(400).json({ error: "Missing data" });
     }
 
-    // 2. PHẢN HỒI NGAY LẬP TỨC cho App chính (Không dùng await)
+    // 3. Phản hồi ngay lập tức
     res.json({ success: true, status: 'Processing' });
 
-    // 3. Thực hiện gửi tin nhắn ngầm dưới nền VPS
-    // Việc này có thể mất 1-2 phút nhưng App chính kệ nó, đã đóng connection rồi.
+    // 4. Thực hiện gửi tin nhắn ngầm
     sendMessage(groupName, message).then(() => {
         console.log(`🏁 Hoàn thành gửi tin cho nhóm: ${groupName}`);
     }).catch(err => {
