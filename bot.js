@@ -2,6 +2,7 @@ const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 
 // Kích hoạt plugin tàng hình
 puppeteer.use(StealthPlugin());
@@ -52,8 +53,7 @@ async function initBot() {
         console.log("⚠️ Zalo yêu cầu quét mã QR!");
         await randomDelay(2000, 3000);
         await page.screenshot({ path: 'zalo_qr.png' });
-        console.log("� Đã chụp ảnh mã QR tại file: zalo_qr.png");
-        console.log("👉 Hãy tải file này về máy để quét mã.");
+        console.log("📸 Đã chụp ảnh mã QR tại file: zalo_qr.png");
         console.log("-------------------------------------------------------");
     } else {
         console.log("✅ Đã nhận diện phiên đăng nhập.");
@@ -79,8 +79,8 @@ async function sendMessage(groupName, message) {
             await page.keyboard.up('Control');
             await page.keyboard.press('Backspace');
             
-            await page.type(searchSelector, groupName, { delay: 100 });
-            await randomDelay(1500, 2000);
+            await page.type(searchSelector, groupName, { delay: 50 });
+            await randomDelay(500, 1000);
 
             const clicked = await page.evaluate((name) => {
                 const elements = Array.from(document.querySelectorAll('.conv-item, .contact-item, div[title], span[title]'));
@@ -94,13 +94,13 @@ async function sendMessage(groupName, message) {
 
             if (!clicked) {
                 await page.keyboard.press('ArrowDown');
-                await randomDelay(500, 800);
+                await randomDelay(200, 400);
                 await page.keyboard.press('Enter');
             }
-            await randomDelay(1500, 2000);
+            await randomDelay(800, 1200);
         }
 
-        // Chọn ô nhập liệu (đa dụng)
+        // Chọn ô nhập liệu
         const inputSelectors = ['#rich-input', '.chat-input-container', 'div[contenteditable="true"]'];
         let foundInput = null;
         for (const selector of inputSelectors) {
@@ -111,51 +111,62 @@ async function sendMessage(groupName, message) {
             }
         }
 
-        // Gõ phím kiểu người thật (Anti-ban)
-        console.log("⌨ Đang gửi dữ liệu ứng viên...");
-        for (const char of message) {
-            await page.keyboard.type(char);
-            await randomDelay(30, 100); 
+        if (!foundInput) {
+            console.log("⚠️ Không thấy ô nhập liệu, click để focus...");
+            await page.mouse.click(600, 600);
+            await randomDelay(500, 800);
         }
 
-        await randomDelay(500, 1000);
+        // Gõ phím - Đã tối ưu tốc độ nhanh hơn
+        console.log("⌨ Đang gõ nội dung...");
+        for (const char of message) {
+            await page.keyboard.type(char);
+            await randomDelay(10, 30); // Giảm delay phím xuống để gửi nhanh hơn
+        }
+
+        await randomDelay(300, 500);
         await page.keyboard.press('Enter');
 
-        console.log("✅ Gửi tin nhắn thành công!");
+        console.log("✅ Đã gửi tin nhắn!");
         return { success: true };
     } catch (error) {
-        console.error("❌ Lỗi Bot:", error.message);
-        await page.screenshot({ path: 'debug_error.png' });
+        console.error("❌ Lỗi gửi ngầm:", error.message);
         return { success: false, error: error.message };
     }
 }
 
-// API Endpoint
-app.post('/send-zalo', async (req, res) => {
-    // Kiểm tra Key bảo mật
+// API Endpoint - Đã nâng cấp thành Async ngầm
+app.post('/send-zalo', (req, res) => {
+    // 1. Kiểm tra Key bảo mật
     const clientKey = req.headers['x-api-key'];
     if (clientKey !== SECRET_KEY) {
-        return res.status(401).json({ error: "Unauthorized: Invalid API Key" });
+        return res.status(401).json({ error: "Unauthorized" });
     }
 
     const { groupName, message } = req.body;
-    if (!groupName || !message) return res.status(400).json({ error: "Missing groupName or message" });
+    if (!groupName || !message) {
+        return res.status(400).json({ error: "Missing data" });
+    }
 
-    const result = await sendMessage(groupName, message);
-    res.json(result.success ? { status: 'Success' } : result);
+    // 2. PHẢN HỒI NGAY LẬP TỨC cho App chính (Không dùng await)
+    res.json({ success: true, status: 'Processing' });
+
+    // 3. Thực hiện gửi tin nhắn ngầm dưới nền VPS
+    // Việc này có thể mất 1-2 phút nhưng App chính kệ nó, đã đóng connection rồi.
+    sendMessage(groupName, message).then(() => {
+        console.log(`🏁 Hoàn thành gửi tin cho nhóm: ${groupName}`);
+    }).catch(err => {
+        console.error(`🏁 Lỗi khi gửi tin ngầm: ${err.message}`);
+    });
 });
 
-// Chụp ảnh lại màn hình QR (Nếu cần lấy lại mã mới)
-app.get('/get-qr', async (req, res) => {
-    await page.goto('https://chat.zalo.me');
-    await randomDelay(3000, 4000);
-    await page.screenshot({ path: 'zalo_qr.png' });
-    res.send("Đã cập nhật file zalo_qr.png. Hãy tải về để quét mã.");
+app.get('/view-qr', (req, res) => {
+    const qrPath = path.join(__dirname, 'zalo_qr.png');
+    res.sendFile(qrPath);
 });
 
 initBot().then(() => {
     app.listen(PORT, '0.0.0.0', () => {
-        console.log(`🚀 Bot Server đang chạy tại cổng: ${PORT}`);
-        console.log(`🔑 Key bảo mật: ${SECRET_KEY}`);
+        console.log(`🚀 Bot ready: http://localhost:${PORT}`);
     });
 });
