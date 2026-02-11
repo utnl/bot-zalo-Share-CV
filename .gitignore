@@ -1,0 +1,11 @@
+node_modules/
+zalo_session/
+*.png
+*.log
+error_debug.png
+debug_error.png
+zalo_qr.png
+package-lock.json
+.project
+.settings/
+.vscode/
