@@ -124,18 +124,15 @@ async function sendMessage(groupName, message) {
             await randomDelay(500, 800);
         }
 
-        // Gõ phím - Chế độ 1 tin nhắn duy nhất với Shift+Enter
-        console.log("⌨ Đang gõ nội dung...");
-        for (const char of message) {
-            if (char === '\n') {
-                await page.keyboard.down('Shift');
-                await page.keyboard.press('Enter');
-                await page.keyboard.up('Shift');
-            } else {
-                await page.keyboard.type(char);
+        // Cơ chế chèn văn bản trực tiếp để CHỐNG RỤNG CHỮ tiếng Việt
+        console.log("📝 Đang đưa nội dung ứng viên vào Zalo...");
+        await page.evaluate((text) => {
+            const input = document.querySelector('#rich-input') || document.querySelector('div[contenteditable="true"]');
+            if (input) {
+                input.innerText = text;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
             }
-            await randomDelay(5, 15); 
-        }
+        }, message);
 
         await randomDelay(500, 1000);
         await page.keyboard.press('Enter');
