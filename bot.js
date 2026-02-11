@@ -14,7 +14,7 @@ app.use(cors());
 // --- CẤU HÌNH ---
 const PORT = 3001;
 const SECRET_KEY = "hihihi"; 
-const IS_VPS = true; 
+const IS_VPS = false; // Để false để hiện trình duyệt trên Remote Desktop cho dễ quản lý
 
 let browser;
 let page;
@@ -22,7 +22,7 @@ let page;
 const randomDelay = (min, max) => new Promise(r => setTimeout(r, Math.floor(Math.random() * (max - min + 1) + min)));
 
 async function initBot() {
-    console.log(`🚀 Đang khởi động Bot (Chế độ VPS: ${IS_VPS})...`);
+    console.log(`🚀 Đang khởi động Bot (Chế độ hiện hình: ${!IS_VPS})...`);
     
     browser = await puppeteer.launch({
         headless: IS_VPS ? "new" : false,
@@ -37,7 +37,14 @@ async function initBot() {
         ]
     });
 
-    page = await browser.newPage();
+    // --- LOGIC DỌN DẸP TAB THỪA (CHỐNG NHIỀU TAB) ---
+    const pages = await browser.pages();
+    // Đóng tất cả các tab cũ nếu có (chỉ để lại 1 tab duy nhất cho sạch)
+    for (let i = 1; i < pages.length; i++) {
+        await pages[i].close();
+    }
+    page = pages[0]; // Sử dụng ngay tab đầu tiên, tránh mở thêm tab trống
+    
     await page.setViewport({ width: 1200, height: 900 });
 
     console.log("🔗 Đang truy cập Zalo Web...");
@@ -80,7 +87,7 @@ async function sendMessage(groupName, message) {
             await page.keyboard.press('Backspace');
             
             await page.type(searchSelector, groupName, { delay: 50 });
-            await randomDelay(500, 1000);
+            await randomDelay(1000, 1500);
 
             const clicked = await page.evaluate((name) => {
                 const elements = Array.from(document.querySelectorAll('.conv-item, .contact-item, div[title], span[title]'));
@@ -94,17 +101,17 @@ async function sendMessage(groupName, message) {
 
             if (!clicked) {
                 await page.keyboard.press('ArrowDown');
-                await randomDelay(200, 400);
+                await randomDelay(400, 600);
                 await page.keyboard.press('Enter');
             }
-            await randomDelay(800, 1200);
+            await randomDelay(1500, 2000);
         }
 
         // Chọn ô nhập liệu
         const inputSelectors = ['#rich-input', '.chat-input-container', 'div[contenteditable="true"]'];
         let foundInput = null;
         for (const selector of inputSelectors) {
-            foundInput = await page.waitForSelector(selector, { visible: true, timeout: 3000 }).catch(() => null);
+            foundInput = await page.waitForSelector(selector, { visible: true, timeout: 5000 }).catch(() => null);
             if (foundInput) {
                 await page.click(selector);
                 break;
@@ -117,11 +124,10 @@ async function sendMessage(groupName, message) {
             await randomDelay(500, 800);
         }
 
-        // Gõ phím - Sửa lỗi gửi nhiều bong bóng tin nhắn
-        console.log("⌨ Đang gõ nội dung (Chế độ 1 tin nhắn duy nhất)...");
+        // Gõ phím - Chế độ 1 tin nhắn duy nhất với Shift+Enter
+        console.log("⌨ Đang gõ nội dung...");
         for (const char of message) {
             if (char === '\n') {
-                // Thay thế xuống dòng bằng Shift + Enter để Zalo không tự gửi tin
                 await page.keyboard.down('Shift');
                 await page.keyboard.press('Enter');
                 await page.keyboard.up('Shift');
@@ -132,9 +138,9 @@ async function sendMessage(groupName, message) {
         }
 
         await randomDelay(500, 1000);
-        await page.keyboard.press('Enter'); // Gửi toàn bộ 1 khối
+        await page.keyboard.press('Enter');
 
-        console.log("✅ Đã gửi trọn bộ thông tin trong 1 tin nhắn!");
+        console.log("✅ Đã gửi trọn bộ thông tin!");
         return { success: true };
     } catch (error) {
         console.error("❌ Lỗi gửi ngầm:", error.message);
@@ -142,39 +148,30 @@ async function sendMessage(groupName, message) {
     }
 }
 
-// API Endpoint - Hỗ trợ giới hạn giờ và gửi ngầm
+// API Endpoint
 app.post('/send-zalo', (req, res) => {
-    // 1. Kiểm tra giờ làm việc (8h - 24h)
+    // 1. Kiểm tra giờ làm việc (8h - 22h)
     const now = new Date();
-    const VietnamHour = (now.getUTCHours() + 7) % 24; // Tính giờ VN từ UTC
+    const VietnamHour = (now.getUTCHours() + 7) % 24;
 
-    if (VietnamHour < 8 && VietnamHour >= 0) {
+    if (VietnamHour < 8 || VietnamHour >= 22) {
         return res.status(403).json({ 
             success: false, 
-            error: `Bot đang trong giờ nghỉ (Giờ VN hiện tại: ${VietnamHour}h). Vui lòng thử lại sau 8h sáng!` 
+            error: `Ngoài giờ làm việc (Giờ VN: ${VietnamHour}h). Bot hoạt động từ 8h-22h.` 
         });
     }
 
-    // 2. Kiểm tra Key bảo mật
     const clientKey = req.headers['x-api-key'];
-    if (clientKey !== SECRET_KEY) {
-        return res.status(401).json({ error: "Unauthorized" });
-    }
+    if (clientKey !== SECRET_KEY) return res.status(401).json({ error: "Unauthorized" });
 
     const { groupName, message } = req.body;
-    if (!groupName || !message) {
-        return res.status(400).json({ error: "Missing data" });
-    }
+    if (!groupName || !message) return res.status(400).json({ error: "Missing data" });
 
-    // 3. Phản hồi ngay lập tức
+    // Phản hồi ngay cho App chính
     res.json({ success: true, status: 'Processing' });
 
-    // 4. Thực hiện gửi tin nhắn ngầm
-    sendMessage(groupName, message).then(() => {
-        console.log(`🏁 Hoàn thành gửi tin cho nhóm: ${groupName}`);
-    }).catch(err => {
-        console.error(`🏁 Lỗi khi gửi tin ngầm: ${err.message}`);
-    });
+    // Gửi ngầm
+    sendMessage(groupName, message).catch(err => console.error("Lỗi:", err.message));
 });
 
 app.get('/view-qr', (req, res) => {
