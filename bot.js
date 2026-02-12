@@ -156,7 +156,7 @@ async function sendMessage(groupName, message) {
                 await randomDelay(1000, 1500); 
                 
                 checkResult = await page.evaluate((name) => {
-                    // Thử nhiều selector khác nhau vì Zalo có thể thay đổi DOM
+                    // Thử nhiều selector khác nhau
                     const selectors = [
                         '#header-title span', 
                         '#header-title', 
@@ -176,12 +176,20 @@ async function sendMessage(groupName, message) {
 
                     if (!headerText) return { match: false, text: "NULL (Không tìm thấy element)" };
 
-                    const normalizedHeader = headerText.toLowerCase().trim();
-                    const normalizedTarget = name.toLowerCase().trim();
+                    // Normalization mạnh tay: Xóa hết dấu cách, ký tự đặc biệt, chỉ giữ chữ và số
+                    // Cách này xử lý được trường hợp non-breaking space ( ) khác space thường ( )
+                    const cleanString = (str) => {
+                        return str.toLowerCase()
+                            .replace(/\s+/g, '')        // Xóa mọi khoảng trắng
+                            .replace(/[^\p{L}\p{N}]/gu, '') // Chỉ giữ lại chữ (bao gồm tiếng Việt) và số
+                            .trim();
+                    };
+
+                    const cleanHeader = cleanString(headerText);
+                    const cleanTarget = cleanString(name);
                     
-                    // Logic check: Header chứa tên nhóm HOẶC tên nhóm chứa Header 
-                    // (Ví dụ: "Share CV TDC" so với "Share CV TDC (3 thành viên)")
-                    const match = normalizedHeader.includes(normalizedTarget);
+                    // So sánh chuỗi đã làm sạch
+                    const match = cleanHeader.includes(cleanTarget) || cleanTarget.includes(cleanHeader);
                     
                     return { match, text: headerText };
                 }, groupName);
