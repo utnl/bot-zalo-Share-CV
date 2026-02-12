@@ -160,7 +160,7 @@ async function sendMessage(groupName, message) {
             }
 
             // Đợi loading chat window
-            console.log("⏳ Waiting chat window...");
+            console.log("⏳ Đang đợi cửa sổ chat...");
             const maxWaitInfo = 10;
             for(let k=0; k<maxWaitInfo; k++) {
                 await randomDelay(500, 800);
@@ -234,19 +234,69 @@ async function sendMessage(groupName, message) {
         }, message);
 
         // --- TRICK QUAN TRỌNG: Gõ phím giả để kích hoạt React state ---
-        // Nếu chỉ paste API, đôi khi Zalo không biết là đã có chữ -> Nút gửi vấn ẩn
-        // Gõ thêm 1 dấu cách rồi xóa đi -> Zalo sẽ bắt sự kiện nhập liệu thực
-        await randomDelay(100, 200);
-        await page.keyboard.press('Space');
-        await randomDelay(50, 100);
+        // Gõ dấu chấm (.) rồi xóa đi. Delay đủ lâu để Zalo kịp phản ứng.
+        await randomDelay(300, 500);
+        console.log("⚡ Kích hoạt trạng thái nhập liệu...");
+        await page.keyboard.type('.', { delay: 100 });
+        await randomDelay(300, 500);
         await page.keyboard.press('Backspace');
-        await randomDelay(500, 800);
+        await randomDelay(800, 1000);
 
         // --- 3. GỬI TIN NHẮN ---
-        console.log("🚀 NHẤN ENTER...");
-        await page.keyboard.press('Enter');
+        // --- 3. GỬI TIN NHẮN (ƯU TIÊN CLICK NÚT GỬI) ---
+        console.log("🚀 Đang tìm nút Gửi để click (thay vì nhấn Enter)...");
+        
+        const clickedSend = await page.evaluate(() => {
+            // Danh sách selector nút Gửi
+            const selectors = [
+                '.chat-box-input-button.send-msg-btn', // Selector chính xác từ người dùng
+                '.btn-tertiary-primary.chat-box-input-button',
+                '[icon="Sent-msg_24_Line"]', // Selector theo thuộc tính icon
+                '.btn-send', 
+                '.func-send', 
+                'div[title="Gửi"]',
+                'div[data-translate-title="STR_SEND"]', 
+                '.chat-input__send-button',
+                '#chatInputSend'
+            ];
 
-        // Phòng hờ 1: Check xem còn text không (nghĩa là chưa gửi được)
+            // 1. Tìm theo selector chính xác
+            for (const sel of selectors) {
+                const btn = document.querySelector(sel);
+                if (btn && btn.offsetParent !== null) { // Check visible
+                    console.log(`Tìm thấy nút gửi (Selector: ${sel})`);
+                    btn.click();
+                    return true;
+                }
+            }
+            
+            // 2. Tìm theo icon (mạnh mẽ nhất)
+            // Tìm tất cả các element có class chứa 'icon-send' hoặc 'fa-paper-plane'
+            const icons = Array.from(document.querySelectorAll('*'));
+            const sendIcon = icons.find(el => {
+                const cls = (el.className || "").toString();
+                return cls.includes('icon-send') || cls.includes('fa-paper-plane') || cls.includes('func-send');
+            });
+
+            if (sendIcon) {
+                // Click vào nút cha của icon (thường là button hoặc div wrap)
+                const btn = sendIcon.closest('.clickable, button, div[onclick], div[role="button"]') || sendIcon;
+                console.log("Tìm thấy nút gửi qua Icon!");
+                btn.click();
+                return true;
+            }
+
+            return false;
+        });
+
+        if (clickedSend) {
+            console.log("✅ Đã click nút Gửi.");
+        } else {
+            console.log("⚠️ Không thấy nút Gửi, thử vận may với phím Enter...");
+            await page.keyboard.press('Enter');
+        }
+
+        // Phòng hờ: Check lại xem tin nhắn đi chưa
         await randomDelay(1500, 2000);
         const hasText = await page.evaluate(() => {
             const input = document.querySelector('#rich-input') || document.querySelector('div[contenteditable="true"]');
@@ -254,18 +304,12 @@ async function sendMessage(groupName, message) {
         });
 
         if (hasText) {
-            console.log("⚠️ Vẫn còn chữ trong ô nhập -> Enter xịt. Thử click nút Gửi...");
-            const clickedSend = await page.evaluate(() => {
-                const btns = document.querySelectorAll('.btn-send, .func-send, div[title="Gửi"], .clickable-send-btn');
-                for(let b of btns) {
-                     if(b.offsetParent !== null) { // Check visible
-                        b.click(); 
-                        return true;
-                    }
-                }
-                return false;
-            });
-            if (clickedSend) console.log("✅ Đã click nút Gửi dự phòng.");
+            console.error("❌ Vẫn còn chữ trong ô nhập -> Gửi thất bại.");
+            // Thử nhấn Ctrl + Enter (phòng trường hợp Zalo đang set chế độ này)
+             console.log("👉 Thử combo Ctrl + Enter...");
+            await page.keyboard.down('Control');
+            await page.keyboard.press('Enter');
+            await page.keyboard.up('Control');
         } else {
             console.log("✅ Tin nhắn đã bay (ô nhập trống).");
         }
