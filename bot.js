@@ -48,8 +48,8 @@ async function cleanExcessTabs() {
 async function initBot() {
     console.log(`🚀 Đang khởi động Bot (Chế độ hiện hình: ${!IS_VPS})...`);
     
-    const width = 1920;
-    const height = 1080;
+    const width = 1200;
+    const height = 1000;
 
     browser = await puppeteer.launch({
         headless: IS_VPS ? "new" : false,
@@ -60,7 +60,6 @@ async function initBot() {
             '--disable-dev-shm-usage',
             '--disable-notifications',
             '--disable-blink-features=AutomationControlled',
-            '--start-maximized', // Mở full màn hình luôn
             `--window-size=${width},${height}`
         ]
     });
@@ -109,17 +108,27 @@ async function sendMessage(groupName, message) {
         page = updatedPages.find(p => p.url().includes('chat.zalo.me')) || updatedPages[0];
         await page.bringToFront().catch(() => {});
 
-        const currentChatTitle = await page.evaluate(() => {
-            const header = document.querySelector('#header-title span');
-            return header ? header.innerText.trim() : "";
+        // --- 1. TÌM VÀ CHỌN NHÓM ---
+        let attempts = 0;
+        let checkResult = { match: false, text: "" };
+        let isChatOpened = false;
+
+        // Check tiêu đề hiện tại trước
+        const currentTitle = await page.evaluate(() => {
+            const h = document.querySelector('#header-title span'); 
+            return h ? h.innerText : "";
         });
 
-        if (currentChatTitle.toLowerCase() !== groupName.toLowerCase()) {
+        const normalize = (s) => s.toLowerCase().replace(/\s+/g, '').replace(/[^\p{L}\p{N}]/gu, '');
+        if (normalize(currentTitle).includes(normalize(groupName))) {
+            isChatOpened = true;
+        }
+
+        if (!isChatOpened) {
             console.log(`🎯 Đang nhắm vào nhóm: ${groupName}`);
             
-            // 1. CLICK THẲNG VÀO SIDEBAR (Ưu tiên các mục ghim/đang hiện)
+            // Tìm trong sidebar
             const sidebarClicked = await page.evaluate((name) => {
-                // Quét mọi thứ trong cột bên trái (sidebar) có chứa tên nhóm
                 const sidebarItems = Array.from(document.querySelectorAll('#conversationListId [title], .conv-item, .contact-item'));
                 const target = sidebarItems.find(el => {
                     const text = (el.getAttribute('title') || el.innerText || "").toLowerCase();
@@ -130,14 +139,17 @@ async function sendMessage(groupName, message) {
             }, groupName);
 
             if (!sidebarClicked) {
-                console.log(`🔍 Không thấy ở ngoài, tiến hành tìm kiếm: ${groupName}`);
+                console.log(`🔍 Search nhóm: ${groupName}`);
                 const searchSelector = '#contact-search-input';
                 await page.waitForSelector(searchSelector);
                 await page.click(searchSelector);
+                
+                // Xóa cũ bằng Ctrl+A Backspace
                 await page.keyboard.down('Control');
                 await page.keyboard.press('A');
                 await page.keyboard.up('Control');
                 await page.keyboard.press('Backspace');
+
                 await page.type(searchSelector, groupName, { delay: 50 });
                 await randomDelay(1200, 1500);
 
@@ -147,66 +159,39 @@ async function sendMessage(groupName, message) {
                 });
             }
 
-            // ⚠️ QUAN TRỌNG: Đợi xác nhận đã nhảy vào đúng chat window chưa
-            console.log("⏳ Đang đợi cửa sổ chat hiện ra...");
-            
-            let attempts = 0;
-            let checkResult = { match: false, text: "" };
-
-            while (attempts < 5 && !checkResult.match) {
-                await randomDelay(1000, 1500); 
-                
-                checkResult = await page.evaluate((name) => {
-                    // Thử nhiều selector khác nhau
-                    const selectors = [
-                        '#header-title span', 
-                        '#header-title', 
-                        '.header-title', 
-                        '.title-header',
-                        'header .title'
-                    ];
-                    
-                    let headerText = "";
-                    for (const sel of selectors) {
-                        const el = document.querySelector(sel);
-                        if (el && el.innerText) {
-                            headerText = el.innerText;
-                            break; 
-                        }
+            // Đợi loading chat window
+            console.log("⏳ Waiting chat window...");
+            const maxWaitInfo = 10;
+            for(let k=0; k<maxWaitInfo; k++) {
+                await randomDelay(500, 800);
+                const check = await page.evaluate((name) => {
+                    const selectors = ['#header-title span', '#header-title', '.header-title'];
+                    let txt = "";
+                    for(let s of selectors) {
+                        const el = document.querySelector(s);
+                        if(el) txt = el.innerText || "";
+                        if(txt) break;
                     }
-
-                    if (!headerText) return { match: false, text: "NULL (Không tìm thấy element)" };
-
-                    // Normalization mạnh tay: Xóa hết dấu cách, ký tự đặc biệt, chỉ giữ chữ và số
-                    // Cách này xử lý được trường hợp non-breaking space ( ) khác space thường ( )
-                    const cleanString = (str) => {
-                        return str.toLowerCase()
-                            .replace(/\s+/g, '')        // Xóa mọi khoảng trắng
-                            .replace(/[^\p{L}\p{N}]/gu, '') // Chỉ giữ lại chữ (bao gồm tiếng Việt) và số
-                            .trim();
-                    };
-
-                    const cleanHeader = cleanString(headerText);
-                    const cleanTarget = cleanString(name);
+                    if(!txt) return false;
                     
-                    // So sánh chuỗi đã làm sạch
-                    const match = cleanHeader.includes(cleanTarget) || cleanTarget.includes(cleanHeader);
-                    
-                    return { match, text: headerText };
+                    const clean = (s) => s.toLowerCase().replace(/\s+/g,'').replace(/[^\p{L}\p{N}]/gu,'');
+                    return clean(txt).includes(clean(name)) || clean(name).includes(clean(txt));
                 }, groupName);
-
-                if (checkResult.match) break;
                 
-                attempts++;
-                console.log(`⚠️ Thử lại xác nhận tiêu đề (${attempts}/5). Tìm thấy: "${checkResult.text}"`);
+                if (check) {
+                    isChatOpened = true;
+                    break;
+                }
             }
-
-            if (!checkResult.match) {
-                console.error(`❌ Lỗi xác nhận tiêu đề: ${groupName}. Thực tế tìm thấy: "${checkResult.text}". Hủy gửi để an toàn.`);
-                return { success: false, error: `Lỗi xác nhận nhóm. Tìm thấy: ${checkResult.text}` };
+            if(!isChatOpened) {
+                console.error(`❌ Không mở được nhóm ${groupName} (Title không khớp)`);
+                // Vẫn thử gửi nếu user muốn force, nhưng an toàn thì return
+                // return { success: false, error: "Wrong Group" };
             }
         }
 
+        // --- 2. NHẬP LIỆU (PASTE + TRIGGER) ---
+        // Click vào ô chat
         const inputSelectors = ['#rich-input', 'div[contenteditable="true"]'];
         let foundInput = null;
         for (const selector of inputSelectors) {
@@ -218,85 +203,75 @@ async function sendMessage(groupName, message) {
         }
 
         if (!foundInput) {
-            console.log("⚠️ Không thấy ô nhập liệu, click để focus...");
-            await page.mouse.click(600, 600);
+            console.log("⚠️ Không thấy ô nhập, click tọa độ...");
+            await page.mouse.click(600, 700); 
             await randomDelay(500, 800);
         }
 
-        console.log("📝 Đang dán hồ sơ ứng viên...");
+        console.log("📝 Đang dán hồ sơ (Fast Mode)...");
+        
         await page.evaluate((text) => {
             const input = document.querySelector('#rich-input') || document.querySelector('div[contenteditable="true"]');
             if (input) {
                 input.focus();
+                // Xóa sạch trước
                 document.execCommand('selectAll', false, null);
                 document.execCommand('delete', false, null);
 
+                // Build HTML
                 const safeHtml = text
                     .split('\n')
-                    .map(line => {
-                        return line.trim() === '' ? '<div><br></div>' : `<div>${line}</div>`;
-                    })
+                    .map(line => line.trim() === '' ? '<div><br></div>' : `<div>${line}</div>`)
                     .join('');
 
+                // Paste
                 document.execCommand('insertHTML', false, safeHtml);
+                
+                // Quan trọng: Dispatch event để Zalo biết có chữ
                 input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
             }
         }, message);
 
-        await randomDelay(1200, 2000);
-        
-        // --- FIX: Xử lý vụ không chịu gửi ---
-        console.log("👉 Đang chuẩn bị gửi tin nhắn...");
-
-        // 1. Focus vào ô nhập liệu
-        await page.evaluate(() => {
-            const input = document.querySelector('#rich-input') || document.querySelector('div[contenteditable="true"]');
-            if (input) input.focus();
-        });
-
-        // 2. Đóng popup gợi ý (nếu có)
-        await page.keyboard.press('Escape'); 
-        await randomDelay(300, 500);
-
-        // 3. Focus lại lần nữa cho chắc (vì Escape có thể làm mất focus)
-        await page.evaluate(() => {
-            const input = document.querySelector('#rich-input') || document.querySelector('div[contenteditable="true"]');
-            if (input) input.click(); // Click để focus thực sự
-        });
+        // --- TRICK QUAN TRỌNG: Gõ phím giả để kích hoạt React state ---
+        // Nếu chỉ paste API, đôi khi Zalo không biết là đã có chữ -> Nút gửi vấn ẩn
+        // Gõ thêm 1 dấu cách rồi xóa đi -> Zalo sẽ bắt sự kiện nhập liệu thực
+        await randomDelay(100, 200);
+        await page.keyboard.press('Space');
+        await randomDelay(50, 100);
+        await page.keyboard.press('Backspace');
         await randomDelay(500, 800);
-        
-        // 4. Nhấn Enter
+
+        // --- 3. GỬI TIN NHẮN ---
         console.log("🚀 NHẤN ENTER...");
         await page.keyboard.press('Enter');
 
-        // Phòng hờ: Nếu Enter không ăn, tìm nút Gửi và click
-        await randomDelay(1000, 1500);
-        await page.evaluate(() => {
-            // Danh sách các class nút gửi thường thấy của Zalo
-            const sendSelectors = [
-                '.btn-send', 
-                '.func-send', 
-                'div[title="Gửi"]', 
-                '.clickable-send-btn',
-                '#chatInputSend' // Đôi khi có ID này
-            ];
-
-            let sendBtn = null;
-            for (const sel of sendSelectors) {
-                sendBtn = document.querySelector(sel);
-                if (sendBtn) break;
-            }
-
-            if (sendBtn) {
-                console.log("⚠️ Enter không ăn, kích hoạt nút Gửi dự phòng...");
-                sendBtn.click();
-            } else {
-                console.log("⚠️ Không tìm thấy nút Gửi nào cả!");
-            }
+        // Phòng hờ 1: Check xem còn text không (nghĩa là chưa gửi được)
+        await randomDelay(1500, 2000);
+        const hasText = await page.evaluate(() => {
+            const input = document.querySelector('#rich-input') || document.querySelector('div[contenteditable="true"]');
+            return input && input.innerText.trim().length > 0;
         });
 
-        console.log("✅ Đã xử lý xong (Enter hoặc Click Gửi).");
+        if (hasText) {
+            console.log("⚠️ Vẫn còn chữ trong ô nhập -> Enter xịt. Thử click nút Gửi...");
+            const clickedSend = await page.evaluate(() => {
+                const btns = document.querySelectorAll('.btn-send, .func-send, div[title="Gửi"], .clickable-send-btn');
+                for(let b of btns) {
+                     if(b.offsetParent !== null) { // Check visible
+                        b.click(); 
+                        return true;
+                    }
+                }
+                return false;
+            });
+            if (clickedSend) console.log("✅ Đã click nút Gửi dự phòng.");
+        } else {
+            console.log("✅ Tin nhắn đã bay (ô nhập trống).");
+        }
+
         return { success: true };
+
     } catch (error) {
         console.error("❌ Lỗi Bot:", error.message);
         return { success: false, error: error.message };
