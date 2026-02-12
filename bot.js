@@ -196,7 +196,12 @@ async function sendMessage(groupName, message) {
             }
         }, message);
 
-        await randomDelay(1000, 2000);
+        await randomDelay(1200, 2000);
+        
+        // --- FIX: Đóng menu gợi ý của Zalo trước khi Enter ---
+        await page.keyboard.press('Escape'); 
+        await randomDelay(500, 800);
+        
         await page.keyboard.press('Enter');
 
         console.log("✅ Đã gửi trọn bộ thông tin!");
