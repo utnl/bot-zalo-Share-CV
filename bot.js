@@ -49,7 +49,7 @@ async function initBot() {
     console.log(`🚀 Đang khởi động Bot (Chế độ hiện hình: ${!IS_VPS})...`);
     
     const width = 1200;
-    const height = 1200;
+    const height = 850;
 
     browser = await puppeteer.launch({
         headless: IS_VPS ? "new" : false,
@@ -192,12 +192,13 @@ async function sendMessage(groupName, message) {
             }
         }
 
-        console.log("📏 Đang tối ưu tầm nhìn (Cuộn trang & Zoom)...");
+        console.log("📏 Đang tối ưu tầm nhìn (Cuộn chat & Highlight)...");
         await page.evaluate(() => {
-            // Thu nhỏ Zalo về 90% để hiện rõ nội dung hơn
-            document.body.style.zoom = "90%";
-            // Cuộn xuống cuối cùng để lộ vùng nhập liệu
-            window.scrollTo(0, document.body.scrollHeight);
+            // Trả về 100% để hiển thị chuẩn
+            document.body.style.zoom = "100%";
+            // Cuộn khung chat history xuống cuối cùng để thấy tin mới
+            const chatList = document.querySelector('.chat-item-list') || document.querySelector('#chat-item-list');
+            if (chatList) chatList.scrollTop = chatList.scrollHeight;
         });
         await randomDelay(800, 1000);
 
@@ -211,10 +212,13 @@ async function sendMessage(groupName, message) {
         
         let foundInput = null;
         for (const selector of inputSelectors) {
-            // Ép nó phải hiện ra bằng scrollIntoView
+            // Ép nó phải hiện ra và tô màu đánh dấu
             await page.evaluate((s) => {
                 const el = document.querySelector(s);
-                if (el) el.scrollIntoView({ block: 'center' });
+                if (el) {
+                    el.scrollIntoView({ block: 'center' });
+                    el.style.border = "3px solid red"; // Tô đỏ để dễ theo dõi
+                }
             }, selector);
 
             foundInput = await page.waitForSelector(selector, { visible: true, timeout: 3000 }).catch(() => null);
@@ -227,8 +231,8 @@ async function sendMessage(groupName, message) {
 
         if (!foundInput) {
             console.log("⚠️ Không thấy selector ô nhập, click tọa độ dự phòng...");
-            // Ở chiều cao 1200, vùng chat thường nằm ở khoảng 1000-1100
-            await page.mouse.click(600, 1050); 
+            // Ở chiều cao 850, vùng chat thường nằm ở khoảng 700-750
+            await page.mouse.click(600, 750); 
             await randomDelay(500, 800);
         }
 
@@ -326,6 +330,11 @@ async function sendMessage(groupName, message) {
             await page.keyboard.up('Control');
         } else {
             console.log("✅ Tin nhắn đã bay (ô nhập trống).");
+            // Cuộn lại lần cuối để thấy tin đã gửi
+            await page.evaluate(() => {
+                const chatList = document.querySelector('.chat-item-list') || document.querySelector('#chat-item-list');
+                if (chatList) chatList.scrollTop = chatList.scrollHeight;
+            });
         }
 
         return { success: true };
