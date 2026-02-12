@@ -148,20 +148,53 @@ async function sendMessage(groupName, message) {
 
             // ⚠️ QUAN TRỌNG: Đợi xác nhận đã nhảy vào đúng chat window chưa
             console.log("⏳ Đang đợi cửa sổ chat hiện ra...");
-            await randomDelay(2000, 3000); 
             
-            const isCorrectChat = await page.evaluate((name) => {
-                const header = document.querySelector('#header-title span');
-                if (!header) return false;
-                const headerText = header.innerText.toLowerCase().trim();
-                const targetName = name.toLowerCase().trim();
-                // Chỉ cần tiêu đề chứa tên nhóm là OK (để tránh lỗi khi có thêm chữ "- x thành viên")
-                return headerText.includes(targetName);
-            }, groupName);
+            let attempts = 0;
+            let checkResult = { match: false, text: "" };
 
-            if (!isCorrectChat) {
-                console.error(`❌ Lỗi xác nhận tiêu đề: ${groupName}. Hủy gửi để an toàn.`);
-                return { success: false, error: "Không thể xác nhận cửa sổ chat" };
+            while (attempts < 5 && !checkResult.match) {
+                await randomDelay(1000, 1500); 
+                
+                checkResult = await page.evaluate((name) => {
+                    // Thử nhiều selector khác nhau vì Zalo có thể thay đổi DOM
+                    const selectors = [
+                        '#header-title span', 
+                        '#header-title', 
+                        '.header-title', 
+                        '.title-header',
+                        'header .title'
+                    ];
+                    
+                    let headerText = "";
+                    for (const sel of selectors) {
+                        const el = document.querySelector(sel);
+                        if (el && el.innerText) {
+                            headerText = el.innerText;
+                            break; 
+                        }
+                    }
+
+                    if (!headerText) return { match: false, text: "NULL (Không tìm thấy element)" };
+
+                    const normalizedHeader = headerText.toLowerCase().trim();
+                    const normalizedTarget = name.toLowerCase().trim();
+                    
+                    // Logic check: Header chứa tên nhóm HOẶC tên nhóm chứa Header 
+                    // (Ví dụ: "Share CV TDC" so với "Share CV TDC (3 thành viên)")
+                    const match = normalizedHeader.includes(normalizedTarget);
+                    
+                    return { match, text: headerText };
+                }, groupName);
+
+                if (checkResult.match) break;
+                
+                attempts++;
+                console.log(`⚠️ Thử lại xác nhận tiêu đề (${attempts}/5). Tìm thấy: "${checkResult.text}"`);
+            }
+
+            if (!checkResult.match) {
+                console.error(`❌ Lỗi xác nhận tiêu đề: ${groupName}. Thực tế tìm thấy: "${checkResult.text}". Hủy gửi để an toàn.`);
+                return { success: false, error: `Lỗi xác nhận nhóm. Tìm thấy: ${checkResult.text}` };
             }
         }
 
