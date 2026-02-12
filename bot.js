@@ -72,20 +72,22 @@ async function initBot() {
 
 async function sendMessage(groupName, message) {
     try {
-        // --- LOGIC CHỐNG NHẢY TAB QUẢNG CÁO ---
+        // --- LOGIC CHỐNG NHẢY TAB QUẢNG CÁO & TAB TRẮNG ---
         const allPages = await browser.pages();
         for (const p of allPages) {
             const url = p.url();
-            if (!url.includes('chat.zalo.me') && url !== 'about:blank' && allPages.length > 1) {
-                console.log(`🛡️ Đã đóng tab lạ: ${url}`);
+            // Đóng nếu: (Không phải Zalo VÀ có nhiều hơn 1 tab) 
+            // Hoặc là tab trắng dư thừa
+            if ((!url.includes('chat.zalo.me') && allPages.length > 1) || (url === 'about:blank' && allPages.length > 1)) {
+                console.log(`🛡️ Đã đóng tab dư thừa: ${url}`);
                 await p.close().catch(() => {});
             }
         }
-        const updatedPages = await browser.pages();
-        page = updatedPages.find(p => p.url().includes('chat.zalo.me')) || updatedPages[updatedPages.length - 1];
+        // Luôn xác định lại tab chính là Zalo
+        const finalPages = await browser.pages();
+        page = finalPages.find(p => p.url().includes('chat.zalo.me')) || finalPages[0];
         await page.bringToFront().catch(() => {});
-
-        // 1. Kiểm tra tiêu đề chat hiện tại
+        // --------------------------------------------------
         const currentChatTitle = await page.evaluate(() => {
             const header = document.querySelector('#header-title span');
             return header ? header.innerText.trim() : "";
