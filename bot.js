@@ -22,10 +22,32 @@ let messageQueue = Promise.resolve();
 
 const randomDelay = (min, max) => new Promise(r => setTimeout(r, Math.floor(Math.random() * (max - min + 1) + min)));
 
+// Hàm quét và dọn dẹp tab thừa chủ động
+async function cleanExcessTabs() {
+    try {
+        if (!browser) return;
+        const allPages = await browser.pages();
+        if (allPages.length <= 1) return;
+
+        for (const p of allPages) {
+            const url = p.url();
+            // Đóng tab nếu không phải Zalo, hoặc là tab trắng dư thừa
+            if (!url.includes('chat.zalo.me') || url === 'about:blank') {
+                const updatedPages = await browser.pages();
+                // Chỉ đóng nếu vẫn còn ít nhất 1 tab Zalo đang chạy
+                const hasZalo = updatedPages.some(pg => pg.url().includes('chat.zalo.me'));
+                if (hasZalo && updatedPages.length > 1) {
+                    console.log(`🛡️ Robot tự động dọn dẹp tab: ${url}`);
+                    await p.close().catch(() => {});
+                }
+            }
+        }
+    } catch (e) {}
+}
+
 async function initBot() {
     console.log(`🚀 Đang khởi động Bot (Chế độ hiện hình: ${!IS_VPS})...`);
     
-    // Tăng kích thước màn hình khởi động (Cao hơn để thấy nhiều hơn)
     const width = 1200;
     const height = 1000;
 
@@ -40,6 +62,14 @@ async function initBot() {
             '--disable-blink-features=AutomationControlled',
             `--window-size=${width},${height}`
         ]
+    });
+
+    // Radar canh chừng: Cứ có tab mới mở ra là kiểm tra và đóng nếu là rác
+    browser.on('targetcreated', async (target) => {
+        if (target.type() === 'page') {
+            await randomDelay(1000, 2000); // Đợi nó load url tí
+            await cleanExcessTabs();
+        }
     });
 
     const pages = await browser.pages();
@@ -72,22 +102,12 @@ async function initBot() {
 
 async function sendMessage(groupName, message) {
     try {
-        // --- LOGIC CHỐNG NHẢY TAB QUẢNG CÁO & TAB TRẮNG ---
-        const allPages = await browser.pages();
-        for (const p of allPages) {
-            const url = p.url();
-            // Đóng nếu: (Không phải Zalo VÀ có nhiều hơn 1 tab) 
-            // Hoặc là tab trắng dư thừa
-            if ((!url.includes('chat.zalo.me') && allPages.length > 1) || (url === 'about:blank' && allPages.length > 1)) {
-                console.log(`🛡️ Đã đóng tab dư thừa: ${url}`);
-                await p.close().catch(() => {});
-            }
-        }
-        // Luôn xác định lại tab chính là Zalo
-        const finalPages = await browser.pages();
-        page = finalPages.find(p => p.url().includes('chat.zalo.me')) || finalPages[0];
+        await cleanExcessTabs(); // Dọn dẹp một lần nữa trước khi gửi
+
+        const updatedPages = await browser.pages();
+        page = updatedPages.find(p => p.url().includes('chat.zalo.me')) || updatedPages[0];
         await page.bringToFront().catch(() => {});
-        // --------------------------------------------------
+
         const currentChatTitle = await page.evaluate(() => {
             const header = document.querySelector('#header-title span');
             return header ? header.innerText.trim() : "";
@@ -96,9 +116,7 @@ async function sendMessage(groupName, message) {
         if (currentChatTitle.toLowerCase() !== groupName.toLowerCase()) {
             console.log(`🔍 Đang tìm nhóm: ${groupName}`);
             
-            // ƯU TIÊN 1: Tìm trong danh sách ghim/khởi đầu trước (không qua search)
             const clickedAlready = await page.evaluate((name) => {
-                // Tìm trong danh sách ghim hoặc danh sách chat hiển thị
                 const elements = Array.from(document.querySelectorAll('.conv-item, .contact-item, div[title]'));
                 const target = elements.find(el => {
                     const text = (el.getAttribute('title') || el.innerText || "").toLowerCase();
@@ -109,7 +127,6 @@ async function sendMessage(groupName, message) {
             }, groupName);
 
             if (!clickedAlready) {
-                // ƯU TIÊN 2: Nếu không thấy ở ngoài, tiến hành Search
                 const searchSelector = '#contact-search-input';
                 await page.waitForSelector(searchSelector);
                 await page.click(searchSelector);
@@ -122,25 +139,19 @@ async function sendMessage(groupName, message) {
                 await page.type(searchSelector, groupName, { delay: 50 });
                 await randomDelay(1000, 1500);
 
-                // Click vào kết quả đầu tiên xuất hiện trong khung search
                 const searchClicked = await page.evaluate((name) => {
-                    // Chọn các item trong danh sách kết quả tìm kiếm
                     const searchResults = Array.from(document.querySelectorAll('.cl-item, .contact-item, .conv-item'));
                     const target = searchResults.find(el => {
                         const text = (el.innerText || "").toLowerCase();
                         return text.includes(name.toLowerCase());
                     });
                     if (target) { target.click(); return true; }
-                    
-                    // Fallback: Nếu không tìm thấy theo text, thử click đại diện đầu tiên trong danh sách search
                     const firstResult = document.querySelector('.cl-item, .contact-item');
                     if (firstResult) { firstResult.click(); return true; }
-                    
                     return false;
                 }, groupName);
 
                 if (!searchClicked) {
-                    console.log("⌨ Thử dùng phím mũi tên...");
                     await page.keyboard.press('ArrowDown');
                     await randomDelay(400, 600);
                     await page.keyboard.press('Enter');
@@ -149,7 +160,6 @@ async function sendMessage(groupName, message) {
             await randomDelay(1500, 2000);
         }
 
-        // 2. Chọn ô nhập liệu (Rich Text Editor)
         const inputSelectors = ['#rich-input', 'div[contenteditable="true"]'];
         let foundInput = null;
         for (const selector of inputSelectors) {
@@ -166,7 +176,6 @@ async function sendMessage(groupName, message) {
             await randomDelay(500, 800);
         }
 
-        // 3. CƠ CHẾ CHỐNG "NUỐT CHỮ" (Sử dụng insertHTML)
         console.log("📝 Đang dán hồ sơ ứng viên...");
         await page.evaluate((text) => {
             const input = document.querySelector('#rich-input') || document.querySelector('div[contenteditable="true"]');
@@ -198,7 +207,6 @@ async function sendMessage(groupName, message) {
     }
 }
 
-// API Endpoint
 app.post('/send-zalo', (req, res) => {
     const now = new Date();
     const VietnamHour = (now.getUTCHours() + 7) % 24;
