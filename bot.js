@@ -72,6 +72,10 @@ async function initBot() {
         }
     });
 
+    // Cấp quyền Clipboard để dùng tính năng Copy-Paste
+    const context = browser.defaultBrowserContext();
+    await context.overridePermissions('https://chat.zalo.me', ['clipboard-read', 'clipboard-write']);
+
     const pages = await browser.pages();
     for (let i = 1; i < pages.length; i++) {
         await pages[i].close();
@@ -190,48 +194,55 @@ async function sendMessage(groupName, message) {
             }
         }
 
-        // --- 2. NHẬP LIỆU (PASTE + TRIGGER) ---
+        // --- 2. NHẬP LIỆU (SIMULATE PASTE: CTRL+V) ---
         // Click vào ô chat
         const inputSelectors = ['#rich-input', 'div[contenteditable="true"]'];
         let foundInput = null;
         for (const selector of inputSelectors) {
             foundInput = await page.waitForSelector(selector, { visible: true, timeout: 5000 }).catch(() => null);
             if (foundInput) {
+                console.log("🖱️ Focus vào ô chat...");
                 await page.click(selector);
                 break;
             }
         }
 
         if (!foundInput) {
-            console.log("⚠️ Không thấy ô nhập, click tọa độ...");
+            console.log("⚠️ Không thấy selector ô nhập, click tọa độ...");
             await page.mouse.click(600, 700); 
             await randomDelay(500, 800);
         }
 
-        console.log("📝 Đang dán hồ sơ (Fast Mode)...");
+        console.log("� Đang copy nội dung vào Clipboard...");
         
+        // 1. Copy text vào Clipboard của trình duyệt
         await page.evaluate((text) => {
-            const input = document.querySelector('#rich-input') || document.querySelector('div[contenteditable="true"]');
-            if (input) {
-                input.focus();
-                // Xóa sạch trước
-                document.execCommand('selectAll', false, null);
-                document.execCommand('delete', false, null);
-
-                // Build HTML
-                const safeHtml = text
-                    .split('\n')
-                    .map(line => line.trim() === '' ? '<div><br></div>' : `<div>${line}</div>`)
-                    .join('');
-
-                // Paste
-                document.execCommand('insertHTML', false, safeHtml);
-                
-                // Quan trọng: Dispatch event để Zalo biết có chữ
-                input.dispatchEvent(new Event('input', { bubbles: true }));
-                input.dispatchEvent(new Event('change', { bubbles: true }));
-            }
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
         }, message);
+
+        await randomDelay(300, 500);
+
+        // 2. Xóa nội dung cũ (Ctrl+A -> Backspace)
+        console.log("🧹 Xóa nội dung cũ...");
+        await page.keyboard.down('Control');
+        await page.keyboard.press('A');
+        await page.keyboard.up('Control');
+        await page.keyboard.press('Backspace');
+        await randomDelay(300, 500);
+
+        // 3. Dán nội dung (Ctrl+V)
+        console.log("⌨️ Nhấn Ctrl+V để dán...");
+        await page.keyboard.down('Control');
+        await page.keyboard.press('V');
+        await page.keyboard.up('Control');
+        
+        // Đợi Zalo xử lý paste
+        await randomDelay(1000, 1500);
 
         // --- TRICK QUAN TRỌNG: Gõ phím giả để kích hoạt React state ---
         // Gõ dấu chấm (.) rồi xóa đi. Delay đủ lâu để Zalo kịp phản ứng.
