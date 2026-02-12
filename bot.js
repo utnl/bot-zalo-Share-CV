@@ -69,9 +69,45 @@ async function initBot() {
 
 async function sendMessage(groupName, message) {
     try {
-        // ... (phần code tìm nhóm giữ nguyên không đổi) ...
+        // Tối ưu: Kiểm tra tiêu đề chat hiện tại để tránh tìm kiếm lại
+        const currentChatTitle = await page.evaluate(() => {
+            const header = document.querySelector('#header-title span');
+            return header ? header.innerText.trim() : "";
+        });
 
-        // 1. Chọn ô nhập liệu
+        if (currentChatTitle.toLowerCase() !== groupName.toLowerCase()) {
+            console.log(`🔍 Đang tìm nhóm: ${groupName}`);
+            const searchSelector = '#contact-search-input';
+            await page.waitForSelector(searchSelector);
+            await page.click(searchSelector);
+            
+            await page.keyboard.down('Control');
+            await page.keyboard.press('A');
+            await page.keyboard.up('Control');
+            await page.keyboard.press('Backspace');
+            
+            await page.type(searchSelector, groupName, { delay: 50 });
+            await randomDelay(800, 1200);
+
+            const clicked = await page.evaluate((name) => {
+                const elements = Array.from(document.querySelectorAll('.conv-item, .contact-item, div[title], span[title]'));
+                const target = elements.find(el => {
+                    const text = (el.getAttribute('title') || el.innerText || "").toLowerCase();
+                    return text.includes(name.toLowerCase());
+                });
+                if (target) { target.click(); return true; }
+                return false;
+            }, groupName);
+
+            if (!clicked) {
+                await page.keyboard.press('ArrowDown');
+                await randomDelay(400, 600);
+                await page.keyboard.press('Enter');
+            }
+            await randomDelay(1200, 1800);
+        }
+
+        // 1. Chọn ô nhập liệu (Rich Text Editor)
         const inputSelectors = ['#rich-input', 'div[contenteditable="true"]'];
         let foundInput = null;
         for (const selector of inputSelectors) {
@@ -88,28 +124,40 @@ async function sendMessage(groupName, message) {
             await randomDelay(500, 800);
         }
 
-        // 2. SỬA TẠI ĐÂY: Thay vì gõ từng chữ, ta dùng lệnh "dán" văn bản
-        console.log("📥 Đang nạp nội dung tin nhắn...");
+        // 2. CƠ CHẾ CHỐNG "NUỐT CHỮ" (Sử dụng insertHTML)
+        console.log("� Đang dán hồ sơ ứng viên (Bản Fix rụng chữ)...");
         await page.evaluate((text) => {
             const input = document.querySelector('#rich-input') || document.querySelector('div[contenteditable="true"]');
             if (input) {
                 input.focus();
-                // Xóa nội dung cũ nếu có
+                // Xóa sạch nội dung cũ
                 document.execCommand('selectAll', false, null);
                 document.execCommand('delete', false, null);
-                // Dán nội dung mới (giữ nguyên được mọi ký tự tiếng Việt)
-                document.execCommand('insertText', false, text);
+
+                // Biến văn bản thành HTML chia theo từng dòng <div>
+                const safeHtml = text
+                    .split('\n')
+                    .map(line => {
+                        return line.trim() === '' ? '<div><br></div>' : `<div>${line}</div>`;
+                    })
+                    .join('');
+
+                // Dán HTML - Zalo sẽ nhận nguyên khối, không bị rụng dấu
+                document.execCommand('insertHTML', false, safeHtml);
+                
+                // Kích hoạt sự kiện để nút Gửi xuất hiện
+                input.dispatchEvent(new Event('input', { bubbles: true }));
             }
         }, message);
 
-        // 3. Đợi một chút để Zalo nhận diện nội dung rồi mới ấn Enter
-        await randomDelay(800, 1200);
+        // 3. Đợi Zalo "tiêu hóa" nội dung rồi mới bấm Enter
+        await randomDelay(1000, 2000);
         await page.keyboard.press('Enter');
 
-        console.log("✅ Đã gửi trọn bộ thông tin (Không lỗi font)!");
+        console.log("✅ Đã gửi trọn bộ thông tin (Chuẩn SEO & Font)!");
         return { success: true };
     } catch (error) {
-        console.error("❌ Lỗi gửi ngầm:", error.message);
+        console.error("❌ Lỗi Bot:", error.message);
         return { success: false, error: error.message };
     }
 }
