@@ -114,11 +114,13 @@ async function sendMessage(groupName, message) {
         });
 
         if (currentChatTitle.toLowerCase() !== groupName.toLowerCase()) {
-            console.log(`🔍 Đang tìm nhóm: ${groupName}`);
+            console.log(`🎯 Đang nhắm vào nhóm: ${groupName}`);
             
-            const clickedAlready = await page.evaluate((name) => {
-                const elements = Array.from(document.querySelectorAll('.conv-item, .contact-item, div[title]'));
-                const target = elements.find(el => {
+            // 1. CLICK THẲNG VÀO SIDEBAR (Ưu tiên các mục ghim/đang hiện)
+            const sidebarClicked = await page.evaluate((name) => {
+                // Quét mọi thứ trong cột bên trái (sidebar) có chứa tên nhóm
+                const sidebarItems = Array.from(document.querySelectorAll('#conversationListId [title], .conv-item, .contact-item'));
+                const target = sidebarItems.find(el => {
                     const text = (el.getAttribute('title') || el.innerText || "").toLowerCase();
                     return text.includes(name.toLowerCase());
                 });
@@ -126,38 +128,37 @@ async function sendMessage(groupName, message) {
                 return false;
             }, groupName);
 
-            if (!clickedAlready) {
+            if (!sidebarClicked) {
+                console.log(`🔍 Không thấy ở ngoài, tiến hành tìm kiếm: ${groupName}`);
                 const searchSelector = '#contact-search-input';
                 await page.waitForSelector(searchSelector);
                 await page.click(searchSelector);
-                
                 await page.keyboard.down('Control');
                 await page.keyboard.press('A');
                 await page.keyboard.up('Control');
                 await page.keyboard.press('Backspace');
-                
                 await page.type(searchSelector, groupName, { delay: 50 });
-                await randomDelay(1000, 1500);
+                await randomDelay(1200, 1500);
 
-                const searchClicked = await page.evaluate((name) => {
-                    const searchResults = Array.from(document.querySelectorAll('.cl-item, .contact-item, .conv-item'));
-                    const target = searchResults.find(el => {
-                        const text = (el.innerText || "").toLowerCase();
-                        return text.includes(name.toLowerCase());
-                    });
-                    if (target) { target.click(); return true; }
-                    const firstResult = document.querySelector('.cl-item, .contact-item');
-                    if (firstResult) { firstResult.click(); return true; }
-                    return false;
-                }, groupName);
-
-                if (!searchClicked) {
-                    await page.keyboard.press('ArrowDown');
-                    await randomDelay(400, 600);
-                    await page.keyboard.press('Enter');
-                }
+                await page.evaluate(() => {
+                    const firstResult = document.querySelector('.cl-item, .contact-item, .conv-item');
+                    if (firstResult) firstResult.click();
+                });
             }
-            await randomDelay(1500, 2000);
+
+            // ⚠️ QUAN TRỌNG: Đợi xác nhận đã nhảy vào đúng chat window chưa
+            console.log("⏳ Đang đợi cửa sổ chat hiện ra...");
+            await randomDelay(2000, 3000); 
+            
+            const isCorrectChat = await page.evaluate((name) => {
+                const header = document.querySelector('#header-title span');
+                return header && header.innerText.toLowerCase().includes(name.toLowerCase());
+            }, groupName);
+
+            if (!isCorrectChat) {
+                console.error(`❌ Lỗi: Vẫn chưa vào được nhóm ${groupName}. Hủy gửi để an toàn.`);
+                return { success: false, error: "Không thể mở cửa sổ chat" };
+            }
         }
 
         const inputSelectors = ['#rich-input', 'div[contenteditable="true"]'];
