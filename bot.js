@@ -152,12 +152,16 @@ async function sendMessage(groupName, message) {
             
             const isCorrectChat = await page.evaluate((name) => {
                 const header = document.querySelector('#header-title span');
-                return header && header.innerText.toLowerCase().includes(name.toLowerCase());
+                if (!header) return false;
+                const headerText = header.innerText.toLowerCase().trim();
+                const targetName = name.toLowerCase().trim();
+                // Chỉ cần tiêu đề chứa tên nhóm là OK (để tránh lỗi khi có thêm chữ "- x thành viên")
+                return headerText.includes(targetName);
             }, groupName);
 
             if (!isCorrectChat) {
-                console.error(`❌ Lỗi: Vẫn chưa vào được nhóm ${groupName}. Hủy gửi để an toàn.`);
-                return { success: false, error: "Không thể mở cửa sổ chat" };
+                console.error(`❌ Lỗi xác nhận tiêu đề: ${groupName}. Hủy gửi để an toàn.`);
+                return { success: false, error: "Không thể xác nhận cửa sổ chat" };
             }
         }
 
