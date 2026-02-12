@@ -49,7 +49,7 @@ async function initBot() {
     console.log(`🚀 Đang khởi động Bot (Chế độ hiện hình: ${!IS_VPS})...`);
     
     const width = 1200;
-    const height = 1000;
+    const height = 1200;
 
     browser = await puppeteer.launch({
         headless: IS_VPS ? "new" : false,
@@ -192,21 +192,43 @@ async function sendMessage(groupName, message) {
             }
         }
 
+        console.log("📏 Đang tối ưu tầm nhìn (Cuộn trang & Zoom)...");
+        await page.evaluate(() => {
+            // Thu nhỏ Zalo về 90% để hiện rõ nội dung hơn
+            document.body.style.zoom = "90%";
+            // Cuộn xuống cuối cùng để lộ vùng nhập liệu
+            window.scrollTo(0, document.body.scrollHeight);
+        });
+        await randomDelay(800, 1000);
+
         // --- 2. NHẬP LIỆU (PHẢN HỒI NHANH - INSERT TEXT) ---
-        const inputSelectors = ['#rich-input', 'div[contenteditable="true"]'];
+        const inputSelectors = [
+            '#rich-input', 
+            'div[contenteditable="true"]',
+            'div[role="textbox"]',
+            '.rich-input'
+        ];
+        
         let foundInput = null;
         for (const selector of inputSelectors) {
-            foundInput = await page.waitForSelector(selector, { visible: true, timeout: 5000 }).catch(() => null);
+            // Ép nó phải hiện ra bằng scrollIntoView
+            await page.evaluate((s) => {
+                const el = document.querySelector(s);
+                if (el) el.scrollIntoView({ block: 'center' });
+            }, selector);
+
+            foundInput = await page.waitForSelector(selector, { visible: true, timeout: 3000 }).catch(() => null);
             if (foundInput) {
-                // console.log("🖱️ Focus vào ô chat...");
-                await page.click(selector);
+                console.log(`✅ Đã bắt được ô chat: ${selector}`);
+                await foundInput.click();
                 break;
             }
         }
 
         if (!foundInput) {
-            console.log("⚠️ Không thấy selector ô nhập, click tọa độ...");
-            await page.mouse.click(600, 700); 
+            console.log("⚠️ Không thấy selector ô nhập, click tọa độ dự phòng...");
+            // Ở chiều cao 1200, vùng chat thường nằm ở khoảng 1000-1100
+            await page.mouse.click(600, 1050); 
             await randomDelay(500, 800);
         }
 
