@@ -18,6 +18,7 @@ const IS_VPS = false; // Để false để hiện trình duyệt trên Remote De
 
 let browser;
 let page;
+let messageQueue = Promise.resolve(); // Hàng đợi tin nhắn để tránh xung đột khi nhận nhiều request cùng lúc
 
 const randomDelay = (min, max) => new Promise(r => setTimeout(r, Math.floor(Math.random() * (max - min + 1) + min)));
 
@@ -69,6 +70,22 @@ async function initBot() {
 
 async function sendMessage(groupName, message) {
     try {
+        // --- LOGIC CHỐNG NHẢY TAB QUẢNG CÁO ---
+        const allPages = await browser.pages();
+        for (const p of allPages) {
+            const url = p.url();
+            // Nếu là tab lạ (không phải zalo) thì đóng lại để tránh làm loạn Bot
+            if (!url.includes('chat.zalo.me') && url !== 'about:blank' && allPages.length > 1) {
+                console.log(`🛡️ Đã đóng tab lạ: ${url}`);
+                await p.close().catch(() => {});
+            }
+        }
+        // Luôn xác định lại tab chính là Zalo
+        const updatedPages = await browser.pages();
+        page = updatedPages.find(p => p.url().includes('chat.zalo.me')) || updatedPages[updatedPages.length - 1];
+        await page.bringToFront().catch(() => {});
+        // ----------------------------------------
+
         // Tối ưu: Kiểm tra tiêu đề chat hiện tại để tránh tìm kiếm lại
         const currentChatTitle = await page.evaluate(() => {
             const header = document.querySelector('#header-title span');
@@ -125,7 +142,7 @@ async function sendMessage(groupName, message) {
         }
 
         // 2. CƠ CHẾ CHỐNG "NUỐT CHỮ" (Sử dụng insertHTML)
-        console.log("� Đang dán hồ sơ ứng viên (Bản Fix rụng chữ)...");
+        console.log("📝 Đang dán hồ sơ ứng viên (Bản Fix rụng chữ)...");
         await page.evaluate((text) => {
             const input = document.querySelector('#rich-input') || document.querySelector('div[contenteditable="true"]');
             if (input) {
@@ -182,10 +199,19 @@ app.post('/send-zalo', (req, res) => {
     if (!groupName || !message) return res.status(400).json({ error: "Missing data" });
 
     // Phản hồi ngay cho App chính
-    res.json({ success: true, status: 'Processing' });
+    res.json({ success: true, status: 'Queued' });
 
-    // Gửi ngầm
-    sendMessage(groupName, message).catch(err => console.error("Lỗi:", err.message));
+    // --- CƠ CHẾ XẾP HÀNG (QUEUE) TẠI ĐÂY ---
+    messageQueue = messageQueue.then(async () => {
+        try {
+            console.log(`📦 Đang xử lý tin nhắn cho nhóm: ${groupName}`);
+            await sendMessage(groupName, message);
+            // Nghỉ một chút giữa các tin nhắn để tránh bị Zalo quét spam
+            await randomDelay(2000, 4000);
+        } catch (err) {
+            console.error(`❌ Lỗi trong hàng đợi: ${err.message}`);
+        }
+    });
 });
 
 app.get('/view-qr', (req, res) => {
