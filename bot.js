@@ -48,8 +48,8 @@ async function cleanExcessTabs() {
 async function initBot() {
     console.log(`🚀 Đang khởi động Bot (Chế độ hiện hình: ${!IS_VPS})...`);
     
-    const width = 1200;
-    const height = 1000;
+    const width = 1920;
+    const height = 1080;
 
     browser = await puppeteer.launch({
         headless: IS_VPS ? "new" : false,
@@ -60,6 +60,7 @@ async function initBot() {
             '--disable-dev-shm-usage',
             '--disable-notifications',
             '--disable-blink-features=AutomationControlled',
+            '--start-maximized', // Mở full màn hình luôn
             `--window-size=${width},${height}`
         ]
     });
@@ -244,13 +245,57 @@ async function sendMessage(groupName, message) {
 
         await randomDelay(1200, 2000);
         
-        // --- FIX: Đóng menu gợi ý của Zalo trước khi Enter ---
+        // --- FIX: Xử lý vụ không chịu gửi ---
+        console.log("👉 Đang chuẩn bị gửi tin nhắn...");
+
+        // 1. Focus vào ô nhập liệu
+        await page.evaluate(() => {
+            const input = document.querySelector('#rich-input') || document.querySelector('div[contenteditable="true"]');
+            if (input) input.focus();
+        });
+
+        // 2. Đóng popup gợi ý (nếu có)
         await page.keyboard.press('Escape'); 
+        await randomDelay(300, 500);
+
+        // 3. Focus lại lần nữa cho chắc (vì Escape có thể làm mất focus)
+        await page.evaluate(() => {
+            const input = document.querySelector('#rich-input') || document.querySelector('div[contenteditable="true"]');
+            if (input) input.click(); // Click để focus thực sự
+        });
         await randomDelay(500, 800);
         
+        // 4. Nhấn Enter
+        console.log("🚀 NHẤN ENTER...");
         await page.keyboard.press('Enter');
 
-        console.log("✅ Đã gửi trọn bộ thông tin!");
+        // Phòng hờ: Nếu Enter không ăn, tìm nút Gửi và click
+        await randomDelay(1000, 1500);
+        await page.evaluate(() => {
+            // Danh sách các class nút gửi thường thấy của Zalo
+            const sendSelectors = [
+                '.btn-send', 
+                '.func-send', 
+                'div[title="Gửi"]', 
+                '.clickable-send-btn',
+                '#chatInputSend' // Đôi khi có ID này
+            ];
+
+            let sendBtn = null;
+            for (const sel of sendSelectors) {
+                sendBtn = document.querySelector(sel);
+                if (sendBtn) break;
+            }
+
+            if (sendBtn) {
+                console.log("⚠️ Enter không ăn, kích hoạt nút Gửi dự phòng...");
+                sendBtn.click();
+            } else {
+                console.log("⚠️ Không tìm thấy nút Gửi nào cả!");
+            }
+        });
+
+        console.log("✅ Đã xử lý xong (Enter hoặc Click Gửi).");
         return { success: true };
     } catch (error) {
         console.error("❌ Lỗi Bot:", error.message);
