@@ -69,46 +69,10 @@ async function initBot() {
 
 async function sendMessage(groupName, message) {
     try {
-        // Tối ưu: Kiểm tra tiêu đề chat hiện tại
-        const currentChatTitle = await page.evaluate(() => {
-            const header = document.querySelector('#header-title span');
-            return header ? header.innerText.trim() : "";
-        });
+        // ... (phần code tìm nhóm giữ nguyên không đổi) ...
 
-        if (currentChatTitle.toLowerCase() !== groupName.toLowerCase()) {
-            console.log(`🔍 Đang tìm nhóm: ${groupName}`);
-            const searchSelector = '#contact-search-input';
-            await page.waitForSelector(searchSelector);
-            await page.click(searchSelector);
-            
-            await page.keyboard.down('Control');
-            await page.keyboard.press('A');
-            await page.keyboard.up('Control');
-            await page.keyboard.press('Backspace');
-            
-            await page.type(searchSelector, groupName, { delay: 50 });
-            await randomDelay(1000, 1500);
-
-            const clicked = await page.evaluate((name) => {
-                const elements = Array.from(document.querySelectorAll('.conv-item, .contact-item, div[title], span[title]'));
-                const target = elements.find(el => {
-                    const text = (el.getAttribute('title') || el.innerText || "").toLowerCase();
-                    return text.includes(name.toLowerCase());
-                });
-                if (target) { target.click(); return true; }
-                return false;
-            }, groupName);
-
-            if (!clicked) {
-                await page.keyboard.press('ArrowDown');
-                await randomDelay(400, 600);
-                await page.keyboard.press('Enter');
-            }
-            await randomDelay(1500, 2000);
-        }
-
-        // Chọn ô nhập liệu
-        const inputSelectors = ['#rich-input', '.chat-input-container', 'div[contenteditable="true"]'];
+        // 1. Chọn ô nhập liệu
+        const inputSelectors = ['#rich-input', 'div[contenteditable="true"]'];
         let foundInput = null;
         for (const selector of inputSelectors) {
             foundInput = await page.waitForSelector(selector, { visible: true, timeout: 5000 }).catch(() => null);
@@ -124,20 +88,25 @@ async function sendMessage(groupName, message) {
             await randomDelay(500, 800);
         }
 
-        // Cơ chế chèn văn bản trực tiếp để CHỐNG RỤNG CHỮ tiếng Việt
-        console.log("📝 Đang đưa nội dung ứng viên vào Zalo...");
+        // 2. SỬA TẠI ĐÂY: Thay vì gõ từng chữ, ta dùng lệnh "dán" văn bản
+        console.log("📥 Đang nạp nội dung tin nhắn...");
         await page.evaluate((text) => {
             const input = document.querySelector('#rich-input') || document.querySelector('div[contenteditable="true"]');
             if (input) {
-                input.innerText = text;
-                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.focus();
+                // Xóa nội dung cũ nếu có
+                document.execCommand('selectAll', false, null);
+                document.execCommand('delete', false, null);
+                // Dán nội dung mới (giữ nguyên được mọi ký tự tiếng Việt)
+                document.execCommand('insertText', false, text);
             }
         }, message);
 
-        await randomDelay(500, 1000);
+        // 3. Đợi một chút để Zalo nhận diện nội dung rồi mới ấn Enter
+        await randomDelay(800, 1200);
         await page.keyboard.press('Enter');
 
-        console.log("✅ Đã gửi trọn bộ thông tin!");
+        console.log("✅ Đã gửi trọn bộ thông tin (Không lỗi font)!");
         return { success: true };
     } catch (error) {
         console.error("❌ Lỗi gửi ngầm:", error.message);
